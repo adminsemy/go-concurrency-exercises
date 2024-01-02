@@ -11,7 +11,7 @@
 package main
 
 import (
-	"context"
+	"sync"
 	"time"
 )
 
@@ -21,14 +21,28 @@ type User struct {
 	ID        int
 	IsPremium bool
 	TimeUsed  int64 // in seconds
+	done      chan struct{}
+	mx        sync.Mutex
+}
+
+func (u *User) Done() {
+	u.mx.Lock()
+	defer u.mx.Unlock()
+	if u.done != nil {
+		return
+	}
+	u.done = make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Second)
+		close(u.done)
+	}()
 }
 
 // HandleRequest runs the processes requested by users. Returns false
 // if process had to be killed
 func HandleRequest(process func(), u *User) bool {
 	chProcess := make(chan struct{})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	u.Done()
 	go func() {
 		process()
 		close(chProcess)
@@ -37,7 +51,7 @@ func HandleRequest(process func(), u *User) bool {
 		select {
 		case <-chProcess:
 			return true
-		case <-ctx.Done():
+		case <-u.done:
 			if u.IsPremium {
 				return true
 			}
