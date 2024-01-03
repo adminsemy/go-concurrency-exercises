@@ -13,10 +13,33 @@
 
 package main
 
+import (
+	"os"
+	"os/signal"
+	"sync"
+)
+
 func main() {
 	// Create a process
 	proc := MockProcess{}
 
 	// Run the process (blocking)
-	proc.Run()
+	go proc.Run()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		count := 0
+		for {
+			<-c
+			if count == 1 {
+				return
+			}
+			go proc.Stop()
+			count++
+		}
+	}()
+	wg.Wait()
 }
