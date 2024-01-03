@@ -20,12 +20,17 @@ package main
 import (
 	"errors"
 	"log"
+	"sync"
+	"time"
 )
 
 // SessionManager keeps track of all sessions from creation, updating
 // to destroying.
 type SessionManager struct {
-	sessions map[string]Session
+	muTime    sync.Mutex
+	muMap     sync.Mutex
+	timeToDie time.Time
+	sessions  map[string]Session
 }
 
 // Session stores the session's data
@@ -52,6 +57,22 @@ func (m *SessionManager) CreateSession() (string, error) {
 	m.sessions[sessionID] = Session{
 		Data: make(map[string]interface{}),
 	}
+	m.timeToDie = time.Now().Add(time.Second * 5)
+	go func(sessionID string) {
+		var sessionTime time.Time
+		for {
+			m.muTime.Lock()
+			sessionTime = m.timeToDie
+			m.muTime.Unlock()
+			if time.Now().After(sessionTime) {
+				m.muMap.Lock()
+				delete(m.sessions, sessionID)
+				m.muMap.Unlock()
+				return
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}(sessionID)
 
 	return sessionID, nil
 }
@@ -63,6 +84,8 @@ var ErrSessionNotFound = errors.New("SessionID does not exists")
 // GetSessionData returns data related to session if sessionID is
 // found, errors otherwise
 func (m *SessionManager) GetSessionData(sessionID string) (map[string]interface{}, error) {
+	m.muMap.Lock()
+	defer m.muMap.Unlock()
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -72,6 +95,7 @@ func (m *SessionManager) GetSessionData(sessionID string) (map[string]interface{
 
 // UpdateSessionData overwrites the old session data with the new one
 func (m *SessionManager) UpdateSessionData(sessionID string, data map[string]interface{}) error {
+	m.muMap.Lock()
 	_, ok := m.sessions[sessionID]
 	if !ok {
 		return ErrSessionNotFound
@@ -81,7 +105,10 @@ func (m *SessionManager) UpdateSessionData(sessionID string, data map[string]int
 	m.sessions[sessionID] = Session{
 		Data: data,
 	}
-
+	m.muMap.Unlock()
+	m.muTime.Lock()
+	m.timeToDie = time.Now().Add(time.Second * 5)
+	m.muTime.Unlock()
 	return nil
 }
 
